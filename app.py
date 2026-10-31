@@ -2,8 +2,7 @@
 import streamlit as st
 import pandas as pd
 
-from analysis import load_csv, profile
-
+from analysis import guess_column, load_csv, profile, kpis
 
 # 1. Configure the page
 st.set_page_config(
@@ -62,6 +61,88 @@ st.caption(
     f"Current file: {st.session_state['filename']}"
 )
 
+# 6A. Let the user map dataset columns
+columns = df.columns.tolist()
+
+if not columns:
+    st.error("The uploaded dataset has no columns.")
+    st.stop()
+
+with st.sidebar:
+    st.header("Column Mapping")
+
+    # Guess the likely columns automatically
+    sales_guess = guess_column(
+        df, ["sales", "revenue", "amount"]
+    )
+    profit_guess = guess_column(
+        df, ["profit"]
+    )
+    order_guess = guess_column(
+        df, ["order id", "order number"]
+    )
+    date_guess = guess_column(
+        df, ["order date", "date"]
+    )
+    customer_guess = guess_column(
+        df, ["customer name", "customer"]
+    )
+
+    # Required Sales column
+    sales_col = st.selectbox(
+        "Sales column",
+        columns,
+        index=columns.index(sales_guess)
+        if sales_guess in columns else 0,
+        key="sales_col"
+    )
+
+    # Optional columns: None is available as a choice
+    profit_options = ["None"] + columns
+    profit_col = st.selectbox(
+        "Profit column (optional)",
+        profit_options,
+        index=(
+            profit_options.index(profit_guess)
+            if profit_guess in columns else 0
+        ),
+        key="profit_col"
+    )
+
+    order_options = ["None"] + columns
+    order_col = st.selectbox(
+        "Order ID column (optional)",
+        order_options,
+        index=(
+            order_options.index(order_guess)
+            if order_guess in columns else 0
+        ),
+        key="order_col"
+    )
+
+    date_options = ["None"] + columns
+    date_col = st.selectbox(
+        "Date column (optional)",
+        date_options,
+        index=(
+            date_options.index(date_guess)
+            if date_guess in columns else 0
+        ),
+        key="date_col"
+    )
+
+    customer_options = ["None"] + columns
+    customer_col = st.selectbox(
+        "Customer column (optional)",
+        customer_options,
+        index=(
+            customer_options.index(customer_guess)
+            if customer_guess in columns else 0
+        ),
+        key="customer_col"
+    )
+
+
 # 7. Create four tabs
 tab1, tab2, tab3, tab4 = st.tabs(
     ["Overview", "Dashboard", "Ask", "Customers"]
@@ -89,6 +170,55 @@ with tab1:
 
     col4.metric("Missing Values", f"{missing_percent:.1f}%")
 
+    
+    # Show business KPIs in the Overview tab
+    overview_metrics = kpis(
+        df,
+        sales_col,
+        profit_col,
+        order_col,
+        date_col
+    )
+
+    st.subheader("Business KPIs")
+
+    overview_cards = [
+        ("Total Sales", overview_metrics["total_sales"], "currency"),
+        ("Total Profit", overview_metrics["total_profit"], "currency"),
+        ("Profit Margin", overview_metrics["margin_percent"], "percent"),
+        ("Number of Orders", overview_metrics["number_of_orders"], "integer"),
+        ("Average Order Value", overview_metrics["aov"], "currency"),
+        ("Monthly Sales Growth", overview_metrics["growth_percent"], "percent")
+    ]
+
+    available_overview_cards = [
+        card for card in overview_cards
+        if card[1] is not None
+        and not (
+            card[0] in ["Total Profit", "Profit Margin"]
+            and profit_col == "None"
+        )
+        and not (
+            card[0] == "Monthly Sales Growth"
+            and date_col == "None"
+        )
+    ]
+
+    for start in range(0, len(available_overview_cards), 3):
+        row_cards = available_overview_cards[start:start + 3]
+        cols = st.columns(len(row_cards))
+
+        for col, (label, value, kind) in zip(cols, row_cards):
+            if kind == "currency":
+                formatted_value = f"${value:,.2f}"
+            elif kind == "percent":
+                formatted_value = f"{value:.2f}%"
+            else:
+                formatted_value = f"{value:,}"
+
+            col.metric(label, formatted_value)
+
+
     # Show missing-value analysis
     st.subheader("Missing Values by Column")
     st.dataframe(report["missing"], hide_index=True)
@@ -115,16 +245,61 @@ with tab1:
     # Show statistical summary
     st.subheader("Statistical Summary")
     st.dataframe(report["describe"])
-    
+
     st.subheader("First five rows")
     st.dataframe(df.head())
+
 
 # 9. Dashboard tab
 with tab2:
     st.header("Dashboard")
-    st.write(
-        "Business KPIs and charts will be added here."
+
+    metrics = kpis(
+        df,
+        sales_col,
+        profit_col,
+        order_col,
+        date_col
     )
+
+    # Display the KPIs that can be calculated
+    cards = [
+        ("Total Sales", metrics["total_sales"], "currency"),
+        ("Total Profit", metrics["total_profit"], "currency"),
+        ("Profit Margin", metrics["margin_percent"], "percent"),
+        ("Number of Orders", metrics["number_of_orders"], "integer"),
+        ("Average Order Value", metrics["aov"], "currency"),
+        ("Monthly Sales Growth", metrics["growth_percent"], "percent"),
+    ]
+
+    available_cards = [
+        card for card in cards
+        if card[1] is not None
+        and not (
+            card[0] in ["Total Profit", "Profit Margin"]
+            and profit_col == "None"
+        )
+        and not (
+            card[0] == "Monthly Sales Growth"
+            and date_col == "None"
+        )
+    ]
+
+    # Show three KPI cards per row
+    for start in range(0, len(available_cards), 3):
+        row_cards = available_cards[start:start + 3]
+        cols = st.columns(len(row_cards))
+
+        for col, (label, value, kind) in zip(cols, row_cards):
+            if kind == "currency":
+                formatted_value = f"${value:,.2f}"
+            elif kind == "percent":
+                formatted_value = f"{value:.2f}%"
+            else:
+                formatted_value = f"{value:,}"
+
+            col.metric(label, formatted_value)
+
 
 # 10. Ask tab
 with tab3:

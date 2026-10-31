@@ -3,6 +3,103 @@ import pandas as pd
 from pandas.errors import EmptyDataError
 
 
+def guess_column(df, keywords):
+    # Convert all keywords to lowercase
+    keywords = [word.lower() for word in keywords]
+
+    # Check each column name
+    for column in df.columns:
+        column_name = str(column).lower()
+
+        # Check whether any keyword appears in the column name
+        if any(word in column_name for word in keywords):
+            return column
+
+    # Return None if no column matches
+    return None
+
+
+def kpis(
+    df,
+    sales_col,
+    profit_col=None,
+    order_col=None,
+    date_col=None
+):
+    # Convert selected columns safely to numbers
+    sales = pd.to_numeric(
+        df[sales_col], errors="coerce"
+    )
+
+    total_sales = sales.sum()
+
+    # Calculate total profit if a profit column is selected
+    total_profit = None
+    if profit_col and profit_col != "None":
+        profit = pd.to_numeric(
+            df[profit_col], errors="coerce"
+        )
+        total_profit = profit.sum()
+
+    # Calculate profit margin
+    margin_percent = None
+    if total_profit is not None and total_sales != 0:
+        margin_percent = total_profit / total_sales * 100
+
+    # Count distinct orders, or rows if no order column
+    if order_col and order_col != "None":
+        number_of_orders = df[order_col].nunique()
+    else:
+        number_of_orders = len(df)
+
+    # Calculate Average Order Value
+    aov = None
+    if number_of_orders > 0:
+        aov = total_sales / number_of_orders
+
+    # Calculate monthly sales growth
+    growth_percent = None
+
+    if date_col and date_col != "None":
+        dates = pd.to_datetime(
+            df[date_col], errors="coerce"
+        )
+
+        monthly_data = pd.DataFrame({
+            "Month": dates.dt.to_period("M"),
+            "Sales": sales
+        }).dropna(subset=["Month"])
+
+        if not monthly_data.empty:
+            monthly_sales = monthly_data.groupby(
+                "Month"
+            )["Sales"].sum()
+
+            latest_month = monthly_sales.index.max()
+            previous_month = latest_month - 1
+
+            current_sales = monthly_sales.loc[latest_month]
+            previous_sales = monthly_sales.get(
+                previous_month, 0
+            )
+
+            if previous_sales != 0:
+                growth_percent = (
+                    (current_sales - previous_sales)
+                    / abs(previous_sales)
+                    * 100
+                )
+
+    return {
+        "total_sales": total_sales,
+        "total_profit": total_profit,
+        "margin_percent": margin_percent,
+        "number_of_orders": number_of_orders,
+        "aov": aov,
+        "growth_percent": growth_percent
+    }
+
+
 def load_csv(uploaded_file):
     # Try reading the CSV using Pandas' default encoding.
     try:
