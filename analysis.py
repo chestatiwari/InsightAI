@@ -216,3 +216,87 @@ def profile(df):
         "outliers": outliers,
         "describe": df.describe()
     }
+
+def rfm(df, customer_col, date_col, amount_col, invoice_col=None):
+
+    # Make a copy so that the original dataframe is not changed
+    data = df.copy()
+
+    # Convert date column into datetime format
+    data[date_col] = pd.to_datetime(data[date_col], errors="coerce")
+
+    # Convert amount column into numeric format
+    data[amount_col] = pd.to_numeric(data[amount_col], errors="coerce")
+
+    # Remove rows where customer, date, or amount is missing
+    data = data.dropna(subset=[customer_col, date_col, amount_col])
+
+    # Check whether we have enough unique customers
+    if data[customer_col].nunique() < 5:
+        return None
+    
+    # Set snapshot date as one day after the latest purchase
+    snapshot_date = data[date_col].max() + pd.Timedelta(days=1)
+
+    # Calculate Recency, Frequency and Monetary for each customer
+    if invoice_col is not None:
+        rfm_table = data.groupby(customer_col).agg(
+            Recency=(date_col, lambda x: (snapshot_date - x.max()).days),
+            Frequency=(invoice_col, "nunique"),
+            Monetary=(amount_col, "sum")
+        ).reset_index()
+
+    else:
+        rfm_table = data.groupby(customer_col).agg(
+            Recency=(date_col, lambda x: (snapshot_date - x.max()).days),
+            Frequency=(date_col, "count"),
+            Monetary=(amount_col, "sum")
+        ).reset_index()
+
+    # Calculate RFM scores from 1 to 5
+
+    # Recency: lower number of days is better
+    rfm_table["R_score"] = pd.qcut(
+        rfm_table["Recency"].rank(method="first"),
+        q=5,
+        labels=[5, 4, 3, 2, 1],
+        duplicates="drop"
+    ).astype(int)
+
+    # Frequency: higher number of purchases is better
+    rfm_table["F_score"] = pd.qcut(
+        rfm_table["Frequency"].rank(method="first"),
+        q=5,
+        labels=[1, 2, 3, 4, 5],
+        duplicates="drop"
+    ).astype(int)
+
+    # Monetary: higher spending is better
+    rfm_table["M_score"] = pd.qcut(
+        rfm_table["Monetary"].rank(method="first"),
+        q=5,
+        labels=[1, 2, 3, 4, 5],
+        duplicates="drop"
+    ).astype(int)
+
+    # Calculate total RFM score
+    rfm_table["RFM_score"] = (
+        rfm_table["R_score"]
+        + rfm_table["F_score"]
+        + rfm_table["M_score"]
+    )
+
+    # Assign customer segments based on total RFM score
+    def assign_segment(score):
+        if score >= 12:
+            return "Champions"
+        elif score >= 9:
+            return "Loyal"
+        elif score >= 6:
+            return "Potential"
+        else:
+            return "At Risk"
+
+    rfm_table["Segment"] = rfm_table["RFM_score"].apply(assign_segment)
+
+    return rfm_table

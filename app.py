@@ -1,8 +1,9 @@
 
 import streamlit as st
+import plotly.express as px
 import pandas as pd
 
-from analysis import guess_column, load_csv, profile, kpis
+from analysis import guess_column, load_csv, profile, kpis , rfm
 from charts import top_n_bar, trend_line, scatter, histogram
 
 # 1. Configure the page
@@ -511,9 +512,140 @@ with tab3:
         "Natural-language data questions will be added here."
     )
 
+
 # 11. Customers tab
 with tab4:
     st.header("Customer Analysis")
-    st.write(
-        "Customer segmentation and insights will be added here."
+    st.write("Understand customer behaviour using RFM segmentation.")
+    
+    # Create a working copy of the dataset
+    customer_df = df.copy()
+
+    # Calculate total purchase amount if Quantity and Price exist
+    if "Quantity" in customer_df.columns and "Price" in customer_df.columns:
+        customer_df["Amount"] = (
+            pd.to_numeric(customer_df["Quantity"], errors="coerce")
+            * pd.to_numeric(customer_df["Price"], errors="coerce")
+        )
+    # Guess the required columns
+    guessed_customer = guess_column(
+        customer_df, ["customer id", "customer", "client", "buyer"]
     )
+
+    guessed_date = guess_column(
+        customer_df, ["invoice date", "order date", "transaction date", "date"]
+    )
+
+    guessed_amount = guess_column(
+        customer_df, ["sales", "amount", "revenue", "total"]
+    )
+
+    if guessed_date is None or guessed_amount is None:
+        st.warning("Please check that your dataset has valid date and amount columns.")
+        st.stop()
+
+    # Check whether a customer column exists
+    if guessed_customer is None:
+        st.info("No customer column found, RFM needs one.")
+        st.stop()
+
+    # Create three column selectors
+    customer_col = st.selectbox(
+        "Select Customer Column",
+        customer_df.columns,
+        index=list(customer_df.columns).index(guessed_customer)
+    )
+
+    date_col = st.selectbox(
+        "Select Date Column",
+        customer_df.columns,
+        index=list(customer_df.columns).index(guessed_date)
+        if guessed_date is not None else 0
+    )
+
+    amount_col = st.selectbox(
+        "Select Amount Column",
+        customer_df.columns,
+        index=list(customer_df.columns).index(guessed_amount)
+        if guessed_amount is not None else 0
+    )
+
+    # Find the invoice column automatically
+    invoice_col = guess_column(
+        customer_df, ["invoice", "order id", "order number"]
+    )
+
+    # Calculate RFM
+    if st.button("Generate Customer Segments"):
+        rfm_df = rfm(
+            customer_df,
+            customer_col,
+            date_col,
+            amount_col,
+            invoice_col
+        )
+
+        if rfm_df is None:
+            st.warning("At least 5 unique customers are required.")
+        else:
+            st.success("Customer segmentation completed!")
+
+            # Customer count by segment
+            segment_counts = (
+                rfm_df["Segment"]
+                .value_counts()
+                .reset_index()
+            )
+
+            segment_counts.columns = ["Segment", "Customers"]
+
+            st.subheader("Customers by Segment")
+
+            fig = px.bar(
+                segment_counts,
+                x="Segment",
+                y="Customers",
+                color="Segment",
+                title="Customer Segmentation"
+            )
+
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Average RFM values by segment
+            st.subheader("Average RFM Values by Segment")
+
+            segment_summary = (
+                rfm_df.groupby("Segment")[
+                    ["Recency", "Frequency", "Monetary"]
+                ]
+                .mean()
+                .reset_index()
+            )
+
+            st.dataframe(
+                segment_summary,
+                use_container_width=True
+            )
+
+            # Recommended business actions
+            st.subheader("Recommended Business Actions")
+
+            actions = {
+                "Champions": "Reward these customers and ask for referrals.",
+                "Loyal": "Offer upselling and cross-selling opportunities.",
+                "Potential": "Encourage purchases with special offers.",
+                "At Risk": "Send win-back offers or re-engagement emails."
+            }
+
+            for segment, action in actions.items():
+                st.write(f"**{segment}:** {action}")
+
+            # Download RFM results
+            csv_data = rfm_df.to_csv(index=False).encode("utf-8")
+
+            st.download_button(
+                "Download segments (CSV)",
+                csv_data,
+                "rfm_segments.csv"
+            )
+
