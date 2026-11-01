@@ -3,6 +3,7 @@ import streamlit as st
 import pandas as pd
 
 from analysis import guess_column, load_csv, profile, kpis
+from charts import top_n_bar, trend_line, scatter, histogram
 
 # 1. Configure the page
 st.set_page_config(
@@ -299,6 +300,208 @@ with tab2:
                 formatted_value = f"{value:,}"
 
             col.metric(label, formatted_value)
+
+    
+    # ---------------------------------
+    # 5. Dashboard Charts
+    # ---------------------------------
+
+    st.divider()
+    st.subheader("Data Visualizations")
+
+    # Identify numerical columns
+    numeric_cols = df.select_dtypes(include="number").columns.tolist()
+
+    # Identify categorical columns with 2 to 50 unique values
+    category_cols = [
+        col for col in df.select_dtypes(
+            include=["object", "string", "category"]
+        ).columns
+        if 2 <= df[col].nunique() <= 50
+    ]
+
+    # ---------------------------------
+    # Chart 1: Top N Bar Chart
+    # ---------------------------------
+
+    st.subheader("1. Category-wise Analysis")
+
+    if category_cols and numeric_cols:
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            selected_category = st.selectbox(
+                "Choose a category column",
+                category_cols,
+                key="bar_category"
+            )
+
+        with col2:
+            selected_value = st.selectbox(
+                "Choose a numerical column",
+                numeric_cols,
+                key="bar_value"
+            )
+
+        fig = top_n_bar(
+            df,
+            selected_category,
+            selected_value
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Calculate insight
+        grouped_data = df.groupby(
+            selected_category
+        )[selected_value].sum().sort_values(ascending=False)
+
+        if len(grouped_data) > 0:
+            top_category = grouped_data.index[0]
+            total_value = grouped_data.sum()
+
+            if total_value != 0:
+                percentage = (
+                    grouped_data.iloc[0] / total_value
+                ) * 100
+
+                st.info(
+                    f"Top category: {top_category}, "
+                    f"contributing {percentage:.2f}% "
+                    f"of total {selected_value}."
+                )
+
+    else:
+        st.warning(
+            "No suitable categorical or numerical columns found."
+        )
+
+    # ---------------------------------
+    # Chart 2: Monthly Trend Line
+    # ---------------------------------
+
+    st.subheader("2. Monthly Trend Analysis")
+
+    if (
+        date_col != "None"
+        and date_col in df.columns
+        and sales_col in numeric_cols
+    ):
+
+        fig = trend_line(df, date_col, sales_col)
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Calculate monthly insight
+        trend_data = df[[date_col, sales_col]].copy()
+
+        trend_data[date_col] = pd.to_datetime(
+            trend_data[date_col],
+            errors="coerce"
+        )
+
+        trend_data = trend_data.dropna(subset=[date_col])
+
+        trend_data[date_col] = (
+            trend_data[date_col].dt.to_period("M").dt.to_timestamp()
+        )
+
+        monthly_data = trend_data.groupby(
+            date_col
+        )[sales_col].sum()
+
+        if not monthly_data.empty:
+            best_month = monthly_data.idxmax()
+            best_sales = monthly_data.max()
+
+            st.info(
+                f"Highest sales were recorded in "
+                f"{best_month.strftime('%B %Y')}, "
+                f"with total sales of ${best_sales:,.2f}."
+            )
+
+    else:
+        st.warning(
+            "Select a valid date column and numerical Sales column "
+            "in the sidebar to display the monthly trend."
+        )
+
+    # ---------------------------------
+    # Chart 3: Scatter Plot
+    # ---------------------------------
+
+    st.subheader("3. Relationship Between Numerical Columns")
+
+    if len(numeric_cols) >= 2:
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            x_col = st.selectbox(
+                "Choose X-axis column",
+                numeric_cols,
+                key="scatter_x"
+            )
+
+        with col2:
+            y_options = [col for col in numeric_cols if col != x_col]
+
+            y_col = st.selectbox(
+                "Choose Y-axis column",
+                y_options,
+                key="scatter_y"
+            )
+
+        fig = scatter(df, x_col, y_col)
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Calculate correlation
+        correlation = df[[x_col, y_col]].corr().iloc[0, 1]
+
+        if pd.notna(correlation):
+            st.info(
+                f"The correlation between {x_col} and {y_col} "
+                f"is {correlation:.2f}."
+            )
+
+    else:
+        st.warning(
+            "At least two numerical columns are required for a scatter plot."
+        )
+
+    # ---------------------------------
+    # Chart 4: Histogram
+    # ---------------------------------
+
+    st.subheader("4. Numerical Data Distribution")
+
+    if numeric_cols:
+
+        histogram_col = st.selectbox(
+            "Choose a column for distribution analysis",
+            numeric_cols,
+            key="histogram_col"
+        )
+
+        fig = histogram(df, histogram_col)
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Calculate distribution insight
+        mean_value = df[histogram_col].mean()
+        median_value = df[histogram_col].median()
+
+        st.info(
+            f"Average {histogram_col}: {mean_value:,.2f}. "
+            f"Median {histogram_col}: {median_value:,.2f}."
+        )
+
+    else:
+        st.warning("No numerical columns available for a histogram.")
+
+
 
 
 # 10. Ask tab
